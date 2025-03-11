@@ -4,14 +4,15 @@ FROM python:3.11
 # Set the working directory inside the container
 WORKDIR /app
 
-# Copy only the requirements file to leverage caching
+# Copy requirements file and install dependencies
 COPY requirements.txt .
-
-# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Expose FastAPI's default port
-EXPOSE 8001
+# Copy the entire project to the container
+COPY . .
 
-# Start FastAPI application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "5000", "--reload"]
+# Expose the correct port
+EXPOSE 5000
+
+# Start FastAPI application (assuming index.py is the entry point)
+CMD ["uvicorn", "index:app", "--host", "0.0.0.0", "--port", "5000", "--reload"]
