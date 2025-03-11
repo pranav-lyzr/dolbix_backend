@@ -22,5 +22,15 @@ services:
     depends_on:
       - postgres
 
+  fastapi:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # Example connection string to PostgreSQL from FastAPI
+      DATABASE_URL: postgresql://myuser:mypassword@postgres:5432/mydb
+    depends_on:
+      - postgres
+
 volumes:
   pgdata:
