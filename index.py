@@ -16,11 +16,21 @@ import re
 import httpx
 import json
 import uuid  # Add this line to import the uuid module
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 # Database connection with proper encoding for Japanese
-DATABASE_URL = "postgresql://myuser:mypassword@localhost:5432/mydb"
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://myuser:mypassword@localhost:5432/mydb")
 engine = create_engine(DATABASE_URL, client_encoding='utf8')
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+LYZR_API_KEY = os.getenv("LYZR_API_KEY", "sk-default-8roIgovhvCvAZtXXi4ZdosCHmnTt0LiF")
+LYZR_AGENT_ID = os.getenv("LYZR_AGENT_ID", "67ccaed4f48a85278d204")
+LYZR_COMPARE_AGENT_ID = os.getenv("LYZR_COMPARE_AGENT_ID")
 Base = declarative_base()
 
 # ------------------------
@@ -278,7 +288,7 @@ def get_db():
 app = FastAPI(title="Data Upload and Reporting API")  # Japanese title
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[os.getenv("CORS_ORIGINS", "http://localhost:5173"),"http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -899,11 +909,11 @@ async def handle_chat_report_generation(
                 "https://agent-prod.studio.lyzr.ai/v3/inference/chat/",
                 headers={
                     "Content-Type": "application/json",
-                    "x-api-key": "sk-default-8roIgovhvCvAZtXXi4ZdosCHmnTt0LiF"
+                    "x-api-key": LYZR_API_KEY
                 },
                 json={
                     "user_id": "pranav@lyzr.ai",  # Replace with dynamic user ID in production
-                    "agent_id": "67ccaed44f4888a85278d204",
+                    "agent_id": LYZR_AGENT_ID,
                     "session_id": session_id,
                     "message": request.message
                 }
@@ -1061,7 +1071,7 @@ async def compare_reports(request: ReportComparisonRequest, db: Session = Depend
 
     # LYZR AI API details
     lyzr_api_url = "https://agent-prod.studio.lyzr.ai/v3/inference/chat/"
-    lyzr_api_key = "sk-default-8roIgovhvCvAZtXXi4ZdosCHmnTt0LiF"  # Store this in environment variables in production
+    lyzr_api_key = LYZR_API_KEY  # Store this in environment variables in production
     
     # Prepare the message with context about the reports
     message = f"""
@@ -1087,7 +1097,7 @@ async def compare_reports(request: ReportComparisonRequest, db: Session = Depend
                 },
                 json={
                     "user_id": "api_user@example.com",  # You can use a generic user ID or pass from request
-                    "agent_id": "67cc88bd4f4888a85278d101",
+                    "agent_id": LYZR_COMPARE_AGENT_ID,
                     "session_id": session_id,
                     "message": message
                 }
@@ -1211,7 +1221,7 @@ async def comparison_follow_up(
     
     # LYZR AI API details
     lyzr_api_url = "https://agent-prod.studio.lyzr.ai/v3/inference/chat/"
-    lyzr_api_key = "sk-default-8roIgovhvCvAZtXXi4ZdosCHmnTt0LiF"
+    lyzr_api_key = LYZR_API_KEY
     
     # For follow-up questions, we use the same session_id to maintain conversation context
 
@@ -1238,7 +1248,7 @@ async def comparison_follow_up(
                 },
                 json={
                     "user_id": "api_user@example.com",
-                    "agent_id": "67cc88bd4f4888a85278d101",
+                    "agent_id": LYZR_COMPARE_AGENT_ID,
                     "session_id": request.session_id,
                     "message": message
                 }
