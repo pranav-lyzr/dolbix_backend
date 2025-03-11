@@ -1354,3 +1354,8 @@ def format_upload(upload: Optional[MonthlyUpload]) -> Optional[dict]:
         "timestamp": upload.upload_timestamp.isoformat(),
         "upload_id": upload.upload_id
     }
+
+
+@app.get("/health")
+def health_check():
+    return {"status": "healthy"}
