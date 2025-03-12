@@ -300,7 +300,7 @@ def get_db():
 app = FastAPI(title="Data Upload and Reporting API")  # Japanese title
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://master.d3afxyjuseml9k.amplifyapp.com","http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
