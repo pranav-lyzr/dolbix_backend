@@ -300,7 +300,7 @@ def get_db():
 app = FastAPI(title="Data Upload and Reporting API")  # Japanese title
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("CORS_ORIGINS", "http://localhost:5173"),"http://localhost:5173"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -940,7 +940,7 @@ async def handle_chat_report_generation(
     try:
         # Call Lyzr AI API
         print("Payload", request.message)
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
                 "https://agent-prod.studio.lyzr.ai/v3/inference/chat/",
                 headers={
@@ -1149,7 +1149,7 @@ async def compare_reports(request: ReportComparisonRequest, db: Session = Depend
                 }
             )
             print("response code",response)
-            print("response text",response.text())
+            print("response text",response.text)
             # Check if the request was successful
             if response.status_code == 200:
                 response_data = response.json()
