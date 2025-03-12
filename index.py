@@ -1,9 +1,10 @@
 from fastapi import FastAPI, HTTPException, Depends, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from typing import List, Optional, Union, Dict, Any
 from sqlalchemy import (
     create_engine, Column, Integer, String, Numeric, Date, Boolean, 
-    TIMESTAMP, func, JSON, ForeignKey, text
+    TIMESTAMP, func, JSON, ForeignKey, text, inspect
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
@@ -51,6 +52,8 @@ class MonthlyUpload(Base):
     upload_type = Column(String, nullable=False)
     file_name = Column(String, nullable=False)
     name = Column(String, nullable=False)  # Added name field
+    month = Column(String, nullable=False)  # Added name field
+    year = Column(String, nullable=False)  # Added name field
     description = Column(String, nullable=True)  # Added description field
     upload_timestamp = Column(TIMESTAMP, default=func.now())
 
@@ -113,6 +116,8 @@ class PerformanceReportGenerationHistory(Base):
     report_snapshot = Column(JSON)
     upload_id = Column(Integer, ForeignKey('monthly_uploads.upload_id'))
     name = Column(String(255))  # Add name column
+    month = Column(String, nullable=False)  # Added month field
+    year = Column(String, nullable=False)  # Added year field
 
 
 class ReportComparisonRequest(BaseModel):
@@ -170,6 +175,8 @@ class CRMProjectRawModel(BaseModel):
 class CRMUploadPayload(BaseModel):
     file_name: str
     name: str
+    month: str
+    year: str 
     description: Optional[str] = None
     records: List[CRMProjectRawModel]
 
@@ -211,6 +218,8 @@ class ERPSalesRawModel(BaseModel):
 class ERPSalesUploadPayload(BaseModel):
     file_name: str
     name: str
+    month: str
+    year: str
     description: Optional[str] = None
     records: List[ERPSalesRawModel]
 
@@ -226,6 +235,8 @@ class DataCodeMappingModel(BaseModel):
 class DataCodeUploadPayload(BaseModel):
     file_name: str
     name: str
+    month: str
+    year: str
     description: Optional[str] = None
     records: List[DataCodeMappingModel]
 
@@ -245,7 +256,8 @@ class ReportHistoryModel(BaseModel):
     generated_timestamp: datetime
     report_snapshot: dict
     upload_id: int
-
+    month: str
+    year: str
     class Config:
         from_attributes = True
         json_encoders = {
@@ -458,6 +470,8 @@ async def upload_crm(payload: CRMUploadPayload, db: Session = Depends(get_db)):
         upload_type="CRM",
         file_name=payload.file_name,
         name=payload.name,
+        month=payload.month,
+        year=payload.year,
         description=payload.description
     )
     db.add(new_upload)
@@ -494,7 +508,9 @@ async def upload_crm(payload: CRMUploadPayload, db: Session = Depends(get_db)):
 async def upload_erp_sales(payload: ERPSalesUploadPayload, db: Session = Depends(get_db)):
     new_upload = MonthlyUpload(upload_type="ERP_Sales", 
         file_name=payload.file_name,
-        name=payload.name,
+        name=payload.name,        
+        month=payload.month,
+        year=payload.year,
         description=payload.description)
     db.add(new_upload)
     db.commit()
@@ -537,6 +553,8 @@ async def upload_datacode(payload: DataCodeUploadPayload, db: Session = Depends(
         upload_type="DataCode",
         file_name=payload.file_name,
         name=payload.name,
+        month=payload.month,
+        year=payload.year,
         description=payload.description
     )
     db.add(new_upload)
@@ -564,6 +582,8 @@ async def get_crm_uploads(db: Session = Depends(get_db)):
             "upload_id": u.upload_id, 
             "file_name": u.file_name, 
             "name": u.name,
+            "month": u.month,
+            "year": u.year,
             "description": u.description,
             "timestamp": u.upload_timestamp.isoformat()
         }for u in uploads
@@ -577,6 +597,8 @@ async def get_specific_report(report_id: int, db: Session = Depends(get_db)):
     return {
         "report_id": report.report_id,
         "name": report.name,  # Add name
+        "month": report.month,
+        "year": report.year,
         "upload_id": report.upload_id,
         "generated_at": report.generated_timestamp.isoformat(),
         "report_snapshot": report.report_snapshot
@@ -590,6 +612,8 @@ async def get_erp_uploads(db: Session = Depends(get_db)):
             "upload_id": u.upload_id, 
             "file_name": u.file_name, 
             "name": u.name,
+            "month": u.month,
+            "year": u.year,
             "description": u.description,
             "timestamp": u.upload_timestamp.isoformat()
         }for u in uploads
@@ -603,6 +627,8 @@ async def get_datacode_uploads(db: Session = Depends(get_db)):
             "upload_id": u.upload_id, 
             "file_name": u.file_name, 
             "name": u.name,
+            "month": u.month,
+            "year": u.year,
             "description": u.description,
             "timestamp": u.upload_timestamp.isoformat()
         }for u in uploads
@@ -615,7 +641,9 @@ async def get_all_reports(db: Session = Depends(get_db)):
         {
             "report_id": r.report_id,
             "name": r.name, 
-            "upload_id": r.upload_id,
+            "upload_id": r.upload_id,        
+            "month": r.month,
+            "year": r.year,
             "generated_at": r.generated_timestamp.isoformat()
         }for r in reports
     ]
@@ -678,6 +706,8 @@ async def generate_performance_report_endpoint(request: ReportRequest, db: Sessi
         report_snapshot=report,
         upload_id=latest_erp_upload.upload_id,  # Just use one of the latest upload IDs for reference
         name=request.name,  # Add name
+        month=latest_crm_upload.month,  # Fetch month from latest CRM upload
+        year=latest_crm_upload.year,  # Fetch year from latest CRM upload
         generated_timestamp=func.now()
     )
     db.add(new_report)
@@ -840,6 +870,8 @@ async def get_latest_report(db: Session = Depends(get_db)):
         "report_id": latest_report.report_id,
         "upload_id": latest_report.upload_id,
         "name": latest_report.name,  # Add name to the response
+        "month": latest_report.month,
+        "year": latest_report.year,
         "generated_at": latest_report.generated_timestamp.isoformat(),
         "report_snapshot": latest_report.report_snapshot
     }   
@@ -875,6 +907,8 @@ async def generate_latest_report(
         report_snapshot=report,
         upload_id=latest_erp_upload.upload_id,  # Just use one of the latest upload IDs for reference
         name=name,  # Save the name from the query parameter
+        month=latest_crm_upload.month,
+        year=latest_crm_upload.year,
         generated_timestamp=func.now()  # Explicitly set timestamp
     )
     db.add(new_report)
@@ -885,6 +919,8 @@ async def generate_latest_report(
         "message": "レポートが生成されました",
         "report_id": new_report.report_id,
         "name": new_report.name,  # Return the name in the response
+        "month": new_report.month,
+        "year": new_report.year,
         "generated_at": new_report.generated_timestamp.isoformat(),
         "report_snapshot": new_report.report_snapshot
     }
@@ -943,14 +979,16 @@ async def handle_chat_report_generation(
                 db=db,
                 report_data=report_data,
                 session_id=session_id,
-                name=request.name  # Pass the name from the payload
+                name=request.name,  # Pass the name from the payload
             )
-
+            print("values",report_record.month, report_record.year)
             return {
                 "session_id": session_id,
                 "report_id": report_record.report_id,
                 "upload_id": upload_record.upload_id,
                 "name": report_record.name,  # Return the name in the response
+                "month": report_record.month,
+                "year": report_record.year,
                 "generated_at": report_record.generated_timestamp.isoformat(),
                 "report_data": report_data
             }
@@ -970,7 +1008,9 @@ def parse_report_from_response(report_text: str) -> List[dict]:
     """
     try:
         # Extract JSON from markdown code blocks if present
+        print("parse reponse function",report_text)
         json_str = report_text.split("```json")[1].split("```")[0].strip()
+        print("json_str",json_str)
         return json.loads(json_str)
     except (IndexError, json.JSONDecodeError):
         # Fallback to direct JSON parsing
@@ -1014,11 +1054,15 @@ def store_generated_report(
     """
     try:
         name = name or "Chat Generated Report"
+        latest_crm_upload = db.query(MonthlyUpload).filter_by(upload_type="CRM").order_by(MonthlyUpload.upload_timestamp.desc()).first()
+        print("month and crm value",)
         # Create upload record
         upload_record = MonthlyUpload(
             upload_type="CHAT_REPORT",
             file_name=f"{name} - {datetime.now().isoformat()}",
             name=name,
+            month=latest_crm_upload.month,
+            year=latest_crm_upload.year,
             upload_timestamp=func.now()
         )
         db.add(upload_record)
@@ -1030,6 +1074,8 @@ def store_generated_report(
             report_snapshot=report_data,
             upload_id=upload_record.upload_id,
             name=name,  # Use the provided name
+            month=latest_crm_upload.month,
+            year=latest_crm_upload.year,
             generated_timestamp=func.now()
         )
         db.add(report_record)
@@ -1051,7 +1097,7 @@ def store_generated_report(
 async def compare_reports(request: ReportComparisonRequest, db: Session = Depends(get_db)):
     # Generate a session ID if not provided
     session_id = request.session_id or str(uuid.uuid4())
-    
+    print("parameter",request);
     # Create a new comparison record
     comparison_id = str(uuid.uuid4())  # Generate a unique comparison ID
     new_comparison = ReportComparison(
@@ -1085,7 +1131,7 @@ async def compare_reports(request: ReportComparisonRequest, db: Session = Depend
 
         Please analyze the differences between these reports, focusing on changes in projects, revenue, rankings, and trends.
         """
-    
+    print("message",message)
     try:
         # Make the API request to LYZR AI
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -1096,13 +1142,14 @@ async def compare_reports(request: ReportComparisonRequest, db: Session = Depend
                     "x-api-key": lyzr_api_key
                 },
                 json={
-                    "user_id": "api_user@example.com",  # You can use a generic user ID or pass from request
+                    "user_id": "pranav@lyzr.ai",  
                     "agent_id": LYZR_COMPARE_AGENT_ID,
                     "session_id": session_id,
                     "message": message
                 }
             )
-            
+            print("response code",response)
+            print("response text",response.text())
             # Check if the request was successful
             if response.status_code == 200:
                 response_data = response.json()
@@ -1355,6 +1402,65 @@ def format_upload(upload: Optional[MonthlyUpload]) -> Optional[dict]:
         "upload_id": upload.upload_id
     }
 
+
+def update_existing_records():
+    session = SessionLocal()
+    try:
+        # Update MonthlyUpload records
+        uploads = session.query(MonthlyUpload).all()
+        for upload in uploads:
+            if not upload.month or not upload.year:
+                upload_date = upload.upload_timestamp or datetime.utcnow()
+                upload.month = upload_date.strftime('%m')
+                upload.year = upload_date.strftime('%Y')
+        
+        # Update PerformanceReportGenerationHistory records
+        reports = session.query(PerformanceReportGenerationHistory).all()
+        for report in reports:
+            if not report.month or not report.year:
+                report_date = report.generated_timestamp or datetime.utcnow()
+                report.month = report_date.strftime('%m')
+                report.year = report_date.strftime('%Y')
+
+        session.commit()
+        print("Successfully updated existing records.")
+    except Exception as e:
+        session.rollback()
+        print(f"Error updating records: {e}")
+    finally:
+        session.close()
+
+@app.post("/api/update_records")
+def api_update_existing_records():
+    """
+    API to update existing records in MonthlyUpload and PerformanceReportGenerationHistory tables.
+    """
+    try:
+        update_existing_records()
+        return {"message": "Records updated successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating records: {str(e)}")
+
+
+@app.get("/api/monthly_uploads")
+def get_monthly_uploads(db: Session = Depends(lambda: SessionLocal())):
+    uploads = db.query(MonthlyUpload).all()
+    return uploads
+
+@app.get("/api/reports")
+def get_reports(db: Session = Depends(lambda: SessionLocal())):
+    reports = db.query(PerformanceReportGenerationHistory).all()
+    return reports
+
+
+@app.get("/api/table_structure")
+def get_table_structure():
+    inspector = inspect(engine)
+    structure = {}
+    for table_name in inspector.get_table_names():
+        columns = inspector.get_columns(table_name)
+        structure[table_name] = {col['name']: str(col['type']) for col in columns}
+    return structure
 
 @app.get("/health")
 def health_check():
