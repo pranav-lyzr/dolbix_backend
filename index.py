@@ -1403,24 +1403,56 @@ def format_upload(upload: Optional[MonthlyUpload]) -> Optional[dict]:
     }
 
 
+def alter_tables():
+    session = SessionLocal()
+    try:
+        # Add month and year columns to monthly_uploads table if they don't exist
+        session.execute(text("""
+            ALTER TABLE monthly_uploads 
+            ADD COLUMN IF NOT EXISTS month VARCHAR(20),
+            ADD COLUMN IF NOT EXISTS year VARCHAR(4)
+        """))
+
+        # Add month and year columns to performance_report_generation_history table if they don't exist
+        session.execute(text("""
+            ALTER TABLE performance_report_generation_history 
+            ADD COLUMN IF NOT EXISTS month VARCHAR(20),
+            ADD COLUMN IF NOT EXISTS year VARCHAR(4)
+        """))
+
+        session.commit()
+        print("Successfully altered tables to add month and year columns.")
+    except Exception as e:
+        session.rollback()
+        print(f"Error altering tables: {e}")
+    finally:
+        session.close()
+
 def update_existing_records():
     session = SessionLocal()
     try:
-        # Update MonthlyUpload records
-        uploads = session.query(MonthlyUpload).all()
-        for upload in uploads:
-            if not upload.month or not upload.year:
-                upload_date = upload.upload_timestamp or datetime.utcnow()
-                upload.month = upload_date.strftime('%m')
-                upload.year = upload_date.strftime('%Y')
-        
-        # Update PerformanceReportGenerationHistory records
-        reports = session.query(PerformanceReportGenerationHistory).all()
-        for report in reports:
-            if not report.month or not report.year:
-                report_date = report.generated_timestamp or datetime.utcnow()
-                report.month = report_date.strftime('%m')
-                report.year = report_date.strftime('%Y')
+        # Update records with default values
+        session.execute(text("""
+            UPDATE monthly_uploads
+            SET month = 'September'
+            WHERE month IS NULL
+        """))
+        session.execute(text("""
+            UPDATE monthly_uploads
+            SET year = '2024'
+            WHERE year IS NULL
+        """))
+
+        session.execute(text("""
+            UPDATE performance_report_generation_history
+            SET month = 'September'
+            WHERE month IS NULL
+        """))
+        session.execute(text("""
+            UPDATE performance_report_generation_history
+            SET year = '2024'
+            WHERE year IS NULL
+        """))
 
         session.commit()
         print("Successfully updated existing records.")
@@ -1433,11 +1465,12 @@ def update_existing_records():
 @app.post("/api/update_records")
 def api_update_existing_records():
     """
-    API to update existing records in MonthlyUpload and PerformanceReportGenerationHistory tables.
+    API to alter tables and update existing records.
     """
     try:
+        alter_tables()  # Ensure columns exist before updating
         update_existing_records()
-        return {"message": "Records updated successfully"}
+        return {"message": "Tables altered and records updated successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error updating records: {str(e)}")
 
