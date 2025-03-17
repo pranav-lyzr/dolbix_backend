@@ -722,9 +722,145 @@ async def generate_performance_report_endpoint(request: ReportRequest, db: Sessi
         "report_snapshot": new_report.report_snapshot
     }
 
+
+# def create_performance_report(zac_data, datacode_data, kintone_data):
+#     """Create performance report with support for Japanese field names and calendar order"""
+#     performance_report = {}
+    
+#     # Define Japanese month names in calendar order (January to December)
+#     jp_months = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"]
+#     eng_months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+    
+#     # Build phase to project rank mapping
+#     phase_rank_mapping = {}
+#     for item in kintone_data:
+#         phase = item.get('phase', '')
+#         phase_rank_mapping[item['project_name']] = extract_project_rank(phase)
+
+#     # Process ERP data
+#     for item in zac_data:
+#         project_name = item.get('project_name')
+#         if not project_name:
+#             continue
+            
+#         project_code = f"{int(item['job_no']):07d}" if item['job_no'].isdigit() else item['job_no']
+#         if project_code not in performance_report:
+#             parent_code = next(
+#                 (x['parent_code'] for x in datacode_data 
+#                  if x.get('project_name') == project_name),
+#                 ""
+#             )
+#             performance_report[project_code] = {
+#                 "親コード": parent_code,
+#                 "顧客名": item.get('client_name', ''),
+#                 "案件名": project_name,
+#                 "案件ランク": 'SA',
+#                 "案件コード": project_code,
+#                 **{month: 0 for month in eng_months},  # Keep English month names for internal calculations
+#                 "純売上額": 0
+#             }
+
+#         # In the create_performance_report function, modify the part where it processes sales dates:
+
+#         if item.get('sales_date'):
+#             try:
+#                 month = item['sales_date'].strftime('%B')  # English month name
+#                 op_profit = float(item.get('operating_profit', 0))
+#                 performance_report[project_code][month] += op_profit
+#                 performance_report[project_code]["純売上額"] += op_profit
+#             except Exception as e:
+#                 print(f"Error processing ERP data with date {item.get('sales_date')}: {e}")
+#                 # Use current month as fallback
+#                 current_month = datetime.now().strftime('%B')
+#                 op_profit = float(item.get('operating_profit', 0))
+#                 performance_report[project_code][current_month] += op_profit
+#                 performance_report[project_code]["純売上額"] += op_profit
+#         else:
+#             # No sales date, assign to current month
+#             current_month = datetime.now().strftime('%B')
+#             op_profit = float(item.get('operating_profit', 0))
+#             performance_report[project_code][current_month] += op_profit
+#             performance_report[project_code]["純売上額"] += op_profit
+
+#     # Process CRM data
+#     for item in kintone_data:
+#         try:
+#             project_code = f"{item['project_id']:07d}"
+#             high_potential = item.get('high_potential_mark', False)
+#             project_rank = phase_rank_mapping.get(item['project_name'], 'E')
+
+#             if (high_potential and project_rank in ['B', 'C', 'D', 'E', 'F']) \
+#                or project_rank == 'A':
+
+#                 if project_code not in performance_report:
+#                     parent_code = next(
+#                         (x['parent_code'] for x in datacode_data 
+#                          if x.get('project_name') == item['project_name']),
+#                         ""
+#                     )
+#                     if project_rank == "SA":
+#                         mapped_rank = "SA"
+#                     elif project_rank == "A":
+#                         mapped_rank = "A"
+#                     elif project_rank in ["B", "C", "D"]:
+#                         mapped_rank = "B"
+#                     elif project_rank == "E":
+#                         mapped_rank = "C"
+#                     elif project_rank == "F":
+#                         mapped_rank = "D"
+#                     else:  # default case
+#                         mapped_rank = "E"
+#                     performance_report[project_code] = {
+#                         "親コード": parent_code,
+#                         "顧客名": item.get('company_name', ''),
+#                         "案件名": item['project_name'],
+#                         "案件ランク": mapped_rank,
+#                         "案件コード": project_code,
+#                         **{month: 0 for month in eng_months},  # Keep English month names
+#                         "純売上額": 0
+#                     }
+                    
+#                 monthly_sales = calculate_monthly_net_sales(
+#                     float(item.get('order_amount_net', 0)) * 1000000,
+#                     item.get('billing_method'),
+#                     item.get('contract_start_date'),
+#                     item.get('contract_end_date')
+#                 )
+
+#                 for month, amount in monthly_sales.items():
+#                     performance_report[project_code][month] += amount
+#                     performance_report[project_code]["純売上額"] += amount
+#         except Exception as e:
+#             print(f"Error processing CRM data: {e}")
+
+#     # Convert to list of values and reorganize fields with months in calendar order and 純売上額 at the end
+#     report_list = []
+#     for project_code, data in performance_report.items():
+#         # Create new properly ordered dictionary
+#         ordered_data = {
+#             "親コード": data["親コード"],
+#             "顧客名": data["顧客名"],
+#             "案件名": data["案件名"],
+#             "案件ランク": data["案件ランク"],
+#             "案件コード": data["案件コード"]
+#         }
+        
+#         # Add months in calendar order (January through December)
+#         for i, eng_month in enumerate(eng_months):
+#             jp_month = jp_months[i]
+#             ordered_data[jp_month] = data[eng_month]
+        
+#         # Add 純売上額 at the end
+#         ordered_data["純売上額"] = data["純売上額"]
+        
+#         report_list.append(ordered_data)
+    
+#     return report_list
+
+
 def create_performance_report(zac_data, datacode_data, kintone_data):
     """Create performance report with Japanese field names in fiscal year order (April-March)"""
-    performance_report = {}
+    performance_report = []
     
     # Japanese month names in fiscal order (April to March)
     jp_months = ["4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月", "1月", "2月", "3月"]
@@ -732,10 +868,10 @@ def create_performance_report(zac_data, datacode_data, kintone_data):
                               "October", "November", "December", "January", "February", "March"]
     
     # Build phase to project rank mapping
-    phase_rank_mapping = {}
-    for item in kintone_data:
-        phase = item.get('phase', '')
-        phase_rank_mapping[item['project_name']] = extract_project_rank(phase)
+    phase_rank_mapping = {item['project_name']: extract_project_rank(item.get('phase', '')) for item in kintone_data}
+
+    # Store project details using a dictionary for quick lookup
+    project_data = {}
 
     # Process ERP data
     for item in zac_data:
@@ -744,13 +880,9 @@ def create_performance_report(zac_data, datacode_data, kintone_data):
             continue
             
         project_code = f"{int(item['job_no']):07d}" if item['job_no'].isdigit() else item['job_no']
-        if project_code not in performance_report:
-            parent_code = next(
-                (x['parent_code'] for x in datacode_data 
-                 if x.get('project_name') == project_name),
-                ""
-            )
-            performance_report[project_code] = {
+        if project_code not in project_data:
+            parent_code = next((x['parent_code'] for x in datacode_data if x.get('project_name') == project_name), "")
+            project_data[project_code] = {
                 "親コード": parent_code,
                 "顧客名": item.get('client_name', ''),
                 "案件名": project_name,
@@ -765,31 +897,17 @@ def create_performance_report(zac_data, datacode_data, kintone_data):
             op_profit = float(item.get('operating_profit', 0))
             if item.get('sales_date'):
                 month_english = item['sales_date'].strftime('%B')
-                try:
-                    fiscal_index = eng_months_fiscal_order.index(month_english)
-                    jp_month = jp_months[fiscal_index]
-                except ValueError:
-                    raise ValueError(f"Invalid month {month_english}")
+                jp_month = jp_months[eng_months_fiscal_order.index(month_english)]
             else:
                 # Fallback to current fiscal month
                 current_month_english = datetime.now().strftime('%B')
-                fiscal_index = eng_months_fiscal_order.index(current_month_english)
-                jp_month = jp_months[fiscal_index]
+                jp_month = jp_months[eng_months_fiscal_order.index(current_month_english)]
 
-            performance_report[project_code][jp_month] += op_profit
-            performance_report[project_code]["純売上額"] += op_profit
+            project_data[project_code][jp_month] += op_profit
+            project_data[project_code]["純売上額"] += op_profit
             
         except Exception as e:
             print(f"Error processing ERP data: {e}")
-            # Fallback to current fiscal month
-            current_month_english = datetime.now().strftime('%B')
-            try:
-                fiscal_index = eng_months_fiscal_order.index(current_month_english)
-                jp_month = jp_months[fiscal_index]
-                performance_report[project_code][jp_month] += op_profit
-                performance_report[project_code]["純売上額"] += op_profit
-            except:
-                pass
 
     # Process CRM data
     for item in kintone_data:
@@ -798,24 +916,14 @@ def create_performance_report(zac_data, datacode_data, kintone_data):
             high_potential = item.get('high_potential_mark', False)
             project_rank = phase_rank_mapping.get(item['project_name'], 'E')
 
-            if (high_potential and project_rank in ['B', 'C', 'D', 'E', 'F']) \
-               or project_rank == 'A':
+            if (high_potential and project_rank in ['B', 'C', 'D', 'E', 'F']) or project_rank == 'A':
+                if project_code not in project_data:
+                    parent_code = next((x['parent_code'] for x in datacode_data if x.get('project_name') == item['project_name']), "")
 
-                if project_code not in performance_report:
-                    parent_code = next(
-                        (x['parent_code'] for x in datacode_data 
-                         if x.get('project_name') == item['project_name']),
-                        ""
-                    )
-                    # Rank mapping logic
-                    if project_rank == "SA": mapped_rank = "SA"
-                    elif project_rank == "A": mapped_rank = "A"
-                    elif project_rank in ["B", "C", "D"]: mapped_rank = "B"
-                    elif project_rank == "E": mapped_rank = "C"
-                    elif project_rank == "F": mapped_rank = "D"
-                    else: mapped_rank = "E"
+                    rank_map = {"SA": "SA", "A": "A", "B": "B", "C": "B", "D": "B", "E": "C", "F": "D"}
+                    mapped_rank = rank_map.get(project_rank, "E")
 
-                    performance_report[project_code] = {
+                    project_data[project_code] = {
                         "親コード": parent_code,
                         "顧客名": item.get('company_name', ''),
                         "案件名": item['project_name'],
@@ -835,41 +943,18 @@ def create_performance_report(zac_data, datacode_data, kintone_data):
 
                 for month_english, amount in monthly_sales.items():
                     try:
-                        fiscal_index = eng_months_fiscal_order.index(month_english)
-                        jp_month = jp_months[fiscal_index]
-                        performance_report[project_code][jp_month] += amount
-                        performance_report[project_code]["純売上額"] += amount
+                        jp_month = jp_months[eng_months_fiscal_order.index(month_english)]
+                        project_data[project_code][jp_month] += amount
+                        project_data[project_code]["純売上額"] += amount
                     except ValueError:
                         print(f"Skipping invalid month {month_english} for project {project_code}")
 
         except Exception as e:
             print(f"Error processing CRM data: {e}")
 
-    return performance_report
+    # Convert dictionary values into a list
+    return list(project_data.values())
 
-    # Convert to list of values and reorganize fields with months in calendar order and 純売上額 at the end
-    report_list = []
-    for project_code, data in performance_report.items():
-        # Create new properly ordered dictionary
-        ordered_data = {
-            "親コード": data["親コード"],
-            "顧客名": data["顧客名"],
-            "案件名": data["案件名"],
-            "案件ランク": data["案件ランク"],
-            "案件コード": data["案件コード"]
-        }
-        
-        # Add months in calendar order (January through December)
-        for i, eng_month in enumerate(eng_months):
-            jp_month = jp_months[i]
-            ordered_data[jp_month] = data[eng_month]
-        
-        # Add 純売上額 at the end
-        ordered_data["純売上額"] = data["純売上額"]
-        
-        report_list.append(ordered_data)
-    
-    return report_list
 
 @app.get("/api/latest_report")
 async def get_latest_report(db: Session = Depends(get_db)):
