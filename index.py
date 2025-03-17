@@ -722,14 +722,14 @@ async def generate_performance_report_endpoint(request: ReportRequest, db: Sessi
         "report_snapshot": new_report.report_snapshot
     }
 
-
 def create_performance_report(zac_data, datacode_data, kintone_data):
-    """Create performance report with support for Japanese field names and calendar order"""
+    """Create performance report with Japanese field names in fiscal year order (April-March)"""
     performance_report = {}
     
-    # Define Japanese month names in calendar order (January to December)
-    jp_months = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"]
-    eng_months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+    # Japanese month names in fiscal order (April to March)
+    jp_months = ["4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月", "1月", "2月", "3月"]
+    eng_months_fiscal_order = ["April", "May", "June", "July", "August", "September", 
+                              "October", "November", "December", "January", "February", "March"]
     
     # Build phase to project rank mapping
     phase_rank_mapping = {}
@@ -756,31 +756,40 @@ def create_performance_report(zac_data, datacode_data, kintone_data):
                 "案件名": project_name,
                 "案件ランク": 'SA',
                 "案件コード": project_code,
-                **{month: 0 for month in eng_months},  # Keep English month names for internal calculations
+                **{month: 0 for month in jp_months},
                 "純売上額": 0
             }
 
-        # In the create_performance_report function, modify the part where it processes sales dates:
-
-        if item.get('sales_date'):
-            try:
-                month = item['sales_date'].strftime('%B')  # English month name
-                op_profit = float(item.get('operating_profit', 0))
-                performance_report[project_code][month] += op_profit
-                performance_report[project_code]["純売上額"] += op_profit
-            except Exception as e:
-                print(f"Error processing ERP data with date {item.get('sales_date')}: {e}")
-                # Use current month as fallback
-                current_month = datetime.now().strftime('%B')
-                op_profit = float(item.get('operating_profit', 0))
-                performance_report[project_code][current_month] += op_profit
-                performance_report[project_code]["純売上額"] += op_profit
-        else:
-            # No sales date, assign to current month
-            current_month = datetime.now().strftime('%B')
+        # Process sales dates with fiscal month mapping
+        try:
             op_profit = float(item.get('operating_profit', 0))
-            performance_report[project_code][current_month] += op_profit
+            if item.get('sales_date'):
+                month_english = item['sales_date'].strftime('%B')
+                try:
+                    fiscal_index = eng_months_fiscal_order.index(month_english)
+                    jp_month = jp_months[fiscal_index]
+                except ValueError:
+                    raise ValueError(f"Invalid month {month_english}")
+            else:
+                # Fallback to current fiscal month
+                current_month_english = datetime.now().strftime('%B')
+                fiscal_index = eng_months_fiscal_order.index(current_month_english)
+                jp_month = jp_months[fiscal_index]
+
+            performance_report[project_code][jp_month] += op_profit
             performance_report[project_code]["純売上額"] += op_profit
+            
+        except Exception as e:
+            print(f"Error processing ERP data: {e}")
+            # Fallback to current fiscal month
+            current_month_english = datetime.now().strftime('%B')
+            try:
+                fiscal_index = eng_months_fiscal_order.index(current_month_english)
+                jp_month = jp_months[fiscal_index]
+                performance_report[project_code][jp_month] += op_profit
+                performance_report[project_code]["純売上額"] += op_profit
+            except:
+                pass
 
     # Process CRM data
     for item in kintone_data:
@@ -798,28 +807,25 @@ def create_performance_report(zac_data, datacode_data, kintone_data):
                          if x.get('project_name') == item['project_name']),
                         ""
                     )
-                    if project_rank == "SA":
-                        mapped_rank = "SA"
-                    elif project_rank == "A":
-                        mapped_rank = "A"
-                    elif project_rank in ["B", "C", "D"]:
-                        mapped_rank = "B"
-                    elif project_rank == "E":
-                        mapped_rank = "C"
-                    elif project_rank == "F":
-                        mapped_rank = "D"
-                    else:  # default case
-                        mapped_rank = "E"
+                    # Rank mapping logic
+                    if project_rank == "SA": mapped_rank = "SA"
+                    elif project_rank == "A": mapped_rank = "A"
+                    elif project_rank in ["B", "C", "D"]: mapped_rank = "B"
+                    elif project_rank == "E": mapped_rank = "C"
+                    elif project_rank == "F": mapped_rank = "D"
+                    else: mapped_rank = "E"
+
                     performance_report[project_code] = {
                         "親コード": parent_code,
                         "顧客名": item.get('company_name', ''),
                         "案件名": item['project_name'],
                         "案件ランク": mapped_rank,
                         "案件コード": project_code,
-                        **{month: 0 for month in eng_months},  # Keep English month names
+                        **{month: 0 for month in jp_months},
                         "純売上額": 0
                     }
                     
+                # Process monthly sales with fiscal month conversion
                 monthly_sales = calculate_monthly_net_sales(
                     float(item.get('order_amount_net', 0)) * 1000000,
                     item.get('billing_method'),
@@ -827,11 +833,19 @@ def create_performance_report(zac_data, datacode_data, kintone_data):
                     item.get('contract_end_date')
                 )
 
-                for month, amount in monthly_sales.items():
-                    performance_report[project_code][month] += amount
-                    performance_report[project_code]["純売上額"] += amount
+                for month_english, amount in monthly_sales.items():
+                    try:
+                        fiscal_index = eng_months_fiscal_order.index(month_english)
+                        jp_month = jp_months[fiscal_index]
+                        performance_report[project_code][jp_month] += amount
+                        performance_report[project_code]["純売上額"] += amount
+                    except ValueError:
+                        print(f"Skipping invalid month {month_english} for project {project_code}")
+
         except Exception as e:
             print(f"Error processing CRM data: {e}")
+
+    return performance_report
 
     # Convert to list of values and reorganize fields with months in calendar order and 純売上額 at the end
     report_list = []
