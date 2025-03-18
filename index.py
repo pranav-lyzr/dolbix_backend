@@ -681,47 +681,125 @@ async def get_specific_datacode_upload(upload_id: int, db: Session = Depends(get
 
 @app.post("/api/generate_report")
 async def generate_performance_report_endpoint(request: ReportRequest, db: Session = Depends(get_db)):
-    # Instead of using provided upload_ids, get the latest uploaded data of each type
-    latest_crm_upload = db.query(MonthlyUpload).filter_by(upload_type="CRM").order_by(MonthlyUpload.upload_timestamp.desc()).first()
-    latest_erp_upload = db.query(MonthlyUpload).filter_by(upload_type="ERP_Sales").order_by(MonthlyUpload.upload_timestamp.desc()).first()
-    latest_datacode_upload = db.query(MonthlyUpload).filter_by(upload_type="DataCode").order_by(MonthlyUpload.upload_timestamp.desc()).first()
+    print(f"Received report request with IDs: 1 {request.upload_ids}")
     
-    if not all([latest_crm_upload, latest_erp_upload, latest_datacode_upload]):
-        raise HTTPException(status_code=400, detail="最新のアップロードデータが見つかりません。すべてのデータタイプをアップロードしてください。")
-    
-    # Get the data from the latest uploads
-    crm_data = db.query(CRMProjectRaw).filter_by(upload_id=latest_crm_upload.upload_id).all()
-    erp_data = db.query(ERPSalesRaw).filter_by(upload_id=latest_erp_upload.upload_id).all()
-    datacode_data = db.query(DataCodeRaw).filter_by(upload_id=latest_datacode_upload.upload_id).all()
+    # Validate input contains exactly 3 unique IDs
+    if len(request.upload_ids) != 3 or len(set(request.upload_ids)) != 3:
+        raise HTTPException(
+            status_code=400,
+            detail="正確に3つの異なるアップロードIDを指定してください CRM、ERP売上、データコードの各タイプから1つずつ "
+        )
 
-    # Generate performance report
-    report = create_performance_report(
-        [d.__dict__ for d in erp_data],
-        [d.__dict__ for d in datacode_data],
-        [d.__dict__ for d in crm_data]
-    )
+    try:
+        # Get all specified upload records
+        print(f"Received report request with IDs: 2 {request.upload_ids}")
 
-    # Save report snapshot
-    new_report = PerformanceReportGenerationHistory(
-        report_snapshot=report,
-        upload_id=latest_erp_upload.upload_id,  # Just use one of the latest upload IDs for reference
-        name=request.name,  # Add name
-        month=latest_crm_upload.month,  # Fetch month from latest CRM upload
-        year=latest_crm_upload.year,  # Fetch year from latest CRM upload
-        generated_timestamp=func.now()
-    )
-    db.add(new_report)
-    db.commit()
-    db.refresh(new_report)  # Refresh to get the latest data, including report_id
+        uploads = db.query(MonthlyUpload).filter(
+            MonthlyUpload.upload_id.in_(request.upload_ids)
+        ).all()
 
-    return {
-        "message": "レポートが生成されました",
-        "report_id": new_report.report_id,
-        "name": new_report.name, 
-        "generated_at": new_report.generated_timestamp.isoformat(),
-        "report_snapshot": new_report.report_snapshot
-    }
+        # Verify we found exactly 3 records
+        if len(uploads) != 3:
+            missing_ids = set(request.upload_ids) - {u.upload_id for u in uploads}
+            raise ValueError(f"次のアップロードIDが見つかりません: {', '.join(map(str, missing_ids))}")
+        print(f"Received report request with IDs:3 {request.upload_ids}")
 
+        # Categorize uploads by type
+        type_mapping = {u.upload_type: u for u in uploads}
+        print(f"Received report request with IDs: 4 {request.upload_ids}")
+        
+        # Validate type composition
+        required_types = {"CRM", "ERP_Sales", "DataCode"}
+        found_types = set(type_mapping.keys())
+        print(f"Received report request with IDs: 5 {request.upload_ids}")
+        
+        if found_types != required_types:
+            missing = required_types - found_types
+            extra = found_types - required_types
+            error_msg = []
+            if missing:
+                error_msg.append(f"不足しているタイプ: {', '.join(missing)}")
+            if extra:
+                error_msg.append(f"不要なタイプ: {', '.join(extra)}")
+            raise ValueError("アップロードタイプが不正です。 " + "; ".join(error_msg))
+        print(f"Received report request with IDs:  6 {request.upload_ids}")
+
+        # Assign validated uploads
+        crm_upload = type_mapping["CRM"]
+        erp_upload = type_mapping["ERP_Sales"]
+        datacode_upload = type_mapping["DataCode"]
+        print(f"Received report request with IDs: 7 {request.upload_ids}")
+
+        # Fetch corresponding data
+        crm_data = db.query(CRMProjectRaw).filter_by(upload_id=crm_upload.upload_id).all()
+        erp_data = db.query(ERPSalesRaw).filter_by(upload_id=erp_upload.upload_id).all()
+        datacode_data = db.query(DataCodeRaw).filter_by(upload_id=datacode_upload.upload_id).all()
+        print(f"Received report request with IDs: 8 {request.upload_ids}")
+
+        # Validate data existence
+        if not crm_data:
+            raise ValueError(f"CRMデータが存在しません（アップロードID: {crm_upload.upload_id}）")
+        if not erp_data:
+            raise ValueError(f"ERPデータが存在しません（アップロードID: {erp_upload.upload_id}）")
+        if not datacode_data:
+            raise ValueError(f"データコードデータが存在しません（アップロードID: {datacode_upload.upload_id}）")
+        print(f"Received report request with IDs: 9 {request.upload_ids}")
+
+        crm_data = db.query(CRMProjectRaw).filter_by(upload_id=crm_upload.upload_id).all()
+        erp_data = db.query(ERPSalesRaw).filter_by(upload_id=erp_upload.upload_id).all()
+        datacode_data = db.query(DataCodeRaw).filter_by(upload_id=datacode_upload.upload_id).all()
+        print(f"Received report request with IDs: 10 {request.upload_ids}")
+
+        if not crm_data:
+            raise ValueError("CRMデータが見つかりません")
+        if not erp_data:
+            raise ValueError("ERPデータが見つかりません")
+        if not datacode_data:
+            raise ValueError("データコードデータが見つかりません")
+        print(f"Received report request with IDs: 11 {request.upload_ids}")
+
+        # Generate performance report
+        report = create_performance_report(
+            [d.__dict__ for d in erp_data],
+            [d.__dict__ for d in datacode_data],
+            [d.__dict__ for d in crm_data]
+        )
+        print(f"Received report request with IDs: 12 {request.upload_ids}")
+
+        # Save report with all upload IDs reference
+        # In the generate_performance_report_endpoint function, modify the report saving section:
+
+        # Save report with all upload IDs reference
+        new_report = PerformanceReportGenerationHistory(
+            report_snapshot=report,
+            upload_id=erp_upload.upload_id,  # Use one of the upload IDs (ERP in this case)
+            name=request.name,
+            month=crm_upload.month,  # Use CRM upload's month/year
+            year=crm_upload.year,
+            generated_timestamp=func.now()
+        )
+        print(f"Received report request with IDs: 13 {request.upload_ids}")
+        
+        db.add(new_report)
+        db.commit()
+        db.refresh(new_report)
+        print(f"Received report request with IDs: 14 {request.upload_ids}")
+
+
+        return {
+            "message": "レポートが生成されました",
+            "report_id": new_report.report_id,
+            "name": new_report.name, 
+            "generated_at": new_report.generated_timestamp.isoformat(),
+            "report_snapshot": new_report.report_snapshot
+        }
+
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="内部エラーが発生しました")
 
 # def create_performance_report(zac_data, datacode_data, kintone_data):
 #     """Create performance report with support for Japanese field names and calendar order"""
