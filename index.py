@@ -1060,7 +1060,7 @@ def create_performance_report(zac_data, datacode_data, kintone_data, crm_month: 
                 project_rank = extract_project_rank(item.get('phase', ''))
                 
                 # Eligibility check logging
-                if not ((high_potential and project_rank in ['B', 'C', 'D', 'E', 'F', 'SA']) or project_rank == 'A'):
+                if not ((high_potential and project_rank in ['B', 'C', 'D', 'E', 'F']) or project_rank == 'A'):
                     print(f"Skipping CRM item {idx} - Not eligible (Rank: {project_rank}, High Potential: {high_potential})")
                     continue
 
