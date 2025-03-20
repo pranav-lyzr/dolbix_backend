@@ -337,23 +337,27 @@ def parse_date(date_str: Optional[str]) -> Optional[datetime.date]:
     # Remove any full-width characters and normalize format
     date_str = date_str.strip().replace("年", "/").replace("月", "/").replace("日", "")
     
-    # Try different Japanese date formats
+    # Try different date formats in priority order
     formats = [
-        "%y/%m/%d",  # 24/01/30
-        "%Y/%m/%d",  # 2024/01/30
-        "%m/%d/%y",  # 01/30/24
-        "%Y年%m月%d日"  # 2024年01月30日 (already converted to 2024/01/30)
+        "%m/%d/%Y",  # MM/DD/YYYY (10/1/2024)
+        "%Y/%m/%d",  # YYYY/MM/DD
+        "%m/%d/%y",  # MM/DD/YY (10/1/24)
+        "%y/%m/%d",  # YY/MM/DD
+        "%Y年%m月%d日"  # Japanese format
     ]
     
     for fmt in formats:
         try:
             parsed_date = datetime.strptime(date_str, fmt)
             
-            # Validate the date (check if it's a valid day of month)
+            # Handle 2-digit year for formats that use %y
+            if fmt in ["%m/%d/%y", "%y/%m/%d"] and parsed_date.year < 2000:
+                parsed_date = parsed_date.replace(year=parsed_date.year + 2000)
+            
+            # Validate day of month
             year, month = parsed_date.year, parsed_date.month
             last_day = calendar.monthrange(year, month)[1]
             
-            # If day is greater than last day of month, adjust to last day
             if parsed_date.day > last_day:
                 return datetime(year, month, last_day).date()
             
@@ -361,29 +365,21 @@ def parse_date(date_str: Optional[str]) -> Optional[datetime.date]:
         except ValueError:
             continue
     
-    # If all formats fail, try to extract and validate date components manually
+    # Fallback for other formats
     try:
         parts = re.split(r'[/\-\.年月日]', date_str)
         parts = [p for p in parts if p.strip()]
         
-        if len(parts) >= 3:
-            year = int(parts[0]) if int(parts[0]) > 1000 else 2000 + int(parts[0])
-            month = int(parts[1])
-            day = int(parts[2])
-            
-            # Validate month and day
-            if month < 1 or month > 12:
-                month = min(max(1, month), 12)
-            
-            last_day = calendar.monthrange(year, month)[1]
-            if day < 1 or day > last_day:
-                day = min(max(1, day), last_day)
-                
-            return datetime(year, month, day).date()
+        if len(parts) == 3:
+            # Try different permutations
+            for fmt in ["%m/%d/%Y", "%d/%m/%Y", "%Y/%m/%d"]:
+                try:
+                    return datetime.strptime("/".join(parts), fmt).date()
+                except:
+                    continue
     except Exception:
         pass
     
-    # For debugging - print problematic date string
     print(f"Could not parse date: {date_str}")
     return None
 
@@ -406,27 +402,27 @@ def get_english_month_name(month_num):
     }
     return eng_months.get(month_num)
 
-def calculate_monthly_net_sales(order_amount: float, 
-                              billing_method: int,
-                              start_date: datetime.date,
-                              end_date: datetime.date) -> dict:
-    """Calculate monthly net sales with support for Japanese fiscal year (April-March)"""
-    if not all([order_amount, start_date, end_date]):
-        return {}
+# def calculate_monthly_net_sales(order_amount: float, 
+#                               billing_method: int,
+#                               start_date: datetime.date,
+#                               end_date: datetime.date) -> dict:
+#     """Calculate monthly net sales with support for Japanese fiscal year (April-March)"""
+#     if not all([order_amount, start_date, end_date]):
+#         return {}
     
-    delta = relativedelta(end_date, start_date)
-    total_months = delta.years * 12 + delta.months + 1
-    billing_method = billing_method if billing_method else total_months
-    monthly_amount = order_amount / billing_method
+#     delta = relativedelta(end_date, start_date)
+#     total_months = delta.years * 12 + delta.months + 1
+#     billing_method = billing_method if billing_method else total_months
+#     monthly_amount = order_amount / billing_method
     
-    result = {}
-    current_date = start_date
-    for _ in range(billing_method):
-        # Use both English and Japanese month names for compatibility
-        month_key = get_english_month_name(current_date.month)
-        result[month_key] = monthly_amount
-        current_date += relativedelta(months=1)
-    return result
+#     result = {}
+#     current_date = start_date
+#     for _ in range(billing_method):
+#         # Use both English and Japanese month names for compatibility
+#         month_key = get_english_month_name(current_date.month)
+#         result[month_key] = monthly_amount
+#         current_date += relativedelta(months=1)
+#     return result
 
 def extract_project_rank(phase: str) -> str:
     """Extract project rank from phase with Japanese support"""
@@ -762,7 +758,9 @@ async def generate_performance_report_endpoint(request: ReportRequest, db: Sessi
         report = create_performance_report(
             [d.__dict__ for d in erp_data],
             [d.__dict__ for d in datacode_data],
-            [d.__dict__ for d in crm_data]
+            [d.__dict__ for d in crm_data],
+            crm_month=crm_upload.month,
+            crm_year=crm_upload.year
         )
         print(f"Received report request with IDs: 12 {request.upload_ids}")
 
@@ -935,73 +933,168 @@ async def generate_performance_report_endpoint(request: ReportRequest, db: Sessi
     
 #     return report_list
 
-
-def create_performance_report(zac_data, datacode_data, kintone_data):
-    """Create performance report with Japanese field names in fiscal year order (April-March)"""
-    performance_report = []
+def get_financial_year_dates(month_str: str, year_str: str) -> tuple:
+    """Calculate financial year dates based on Japanese fiscal calendar"""
+    jp_month_map = {
+        "4月": 4, "5月": 5, "6月": 6, "7月": 7, "8月": 8, "9月": 9,
+        "10月": 10, "11月": 11, "12月": 12, "1月": 1, "2月": 2, "3月": 3
+    }
     
-    # Japanese month names in fiscal order (April to March)
-    jp_months = ["4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月", "1月", "2月", "3月"]
-    eng_months_fiscal_order = ["April", "May", "June", "July", "August", "September", 
-                              "October", "November", "December", "January", "February", "March"]
+    # Clean input and get month number
+    clean_month = month_str.strip()
+    month_num = jp_month_map.get(clean_month, 4)  # Default to April if invalid
     
-    # Build phase to project rank mapping
-    phase_rank_mapping = {item['project_name']: extract_project_rank(item.get('phase', '')) for item in kintone_data}
+    base_year = int(year_str)
+    
+    # Japanese fiscal year starts in April
+    if month_num >= 4:  # April-March
+        start_year = base_year
+    else:  # January-March belong to previous fiscal year
+        start_year = base_year - 1
+    
+    return (
+        datetime(start_year, 4, 1).date(),
+        datetime(start_year + 1, 3, 31).date()
+    )
 
-    # Store project details using a dictionary for quick lookup
-    project_data = {}
-
-    # Process ERP data
-    for item in zac_data:
-        project_name = item.get('project_name')
-        if not project_name:
-            continue
+def get_fiscal_year(report_month: str, report_year: str) -> tuple:
+    """Determine fiscal year based on Japanese fiscal calendar (April-March)"""
+    try:
+        # Convert report month to numerical value
+        month_num = datetime.strptime(report_month, "%B").month
+        year = int(report_year)
+        
+        if month_num >= 4:  # April or later
+            # Fiscal year starts in current report year
+            return (datetime(year, 4, 1).date(), datetime(year+1, 3, 31).date())
+        else:  # January-March
+            # Fiscal year started in previous year
+            return (datetime(year-1, 4, 1).date(), datetime(year, 3, 31).date())
             
-        project_code = f"{int(item['job_no']):07d}" if item['job_no'].isdigit() else item['job_no']
-        if project_code not in project_data:
-            parent_code = next((x['parent_code'] for x in datacode_data if x.get('project_name') == project_name), "")
-            project_data[project_code] = {
-                "親コード": parent_code,
-                "顧客名": item.get('client_name', ''),
-                "案件名": project_name,
-                "案件ランク": 'SA',
-                "案件コード": project_code,
-                **{month: 0 for month in jp_months},
-                "純売上額": 0
-            }
+    except ValueError:
+        raise ValueError(f"Invalid month format: {report_month}")
 
-        # Process sales dates with fiscal month mapping
-        try:
-            op_profit = float(item.get('operating_profit', 0))
-            if item.get('sales_date'):
-                month_english = item['sales_date'].strftime('%B')
-                jp_month = jp_months[eng_months_fiscal_order.index(month_english)]
-            else:
-                # Fallback to current fiscal month
-                current_month_english = datetime.now().strftime('%B')
-                jp_month = jp_months[eng_months_fiscal_order.index(current_month_english)]
+def create_performance_report(zac_data, datacode_data, kintone_data, crm_month: str, crm_year: str):
+    """Create performance report with detailed logging"""
+    performance_report = {}
+    erp_projects = {}
+    crm_projects = {}
+    print(f"Starting report generation for {crm_month}/{crm_year}")
+    
+    try:
+        financial_year_start, financial_year_end = get_fiscal_year(crm_month, crm_year)
+        print(f"Financial year range: {financial_year_start} to {financial_year_end}")
+        
+        # Japanese month names in fiscal order
+        jp_months = ["4月", "5月", "6月", "7月", "8月", "9月", 
+                    "10月", "11月", "12月", "1月", "2月", "3月"]
+        
+        # Process ERP data with detailed logging
+        print(f"Processing {len(zac_data)} ERP records")
+        for idx, item in enumerate(zac_data):
+            try:
+                print(f"Processing ERP item {idx}: {item.get('job_no')}")
+                
+                # Financial year validation
+                if not item.get('sales_date'):
+                    print(f"Skipping ERP item {idx} - Missing sales_date")
+                    continue
+                    
+                if not (financial_year_start <= item['sales_date'] <= financial_year_end):
+                    print(f"Skipping ERP item {idx} - Date {item['sales_date']} outside financial year")
+                    continue
 
-            project_data[project_code][jp_month] += op_profit
-            project_data[project_code]["純売上額"] += op_profit
-            
-        except Exception as e:
-            print(f"Error processing ERP data: {e}")
+                project_name = item.get('project_name')
+                if not project_name:
+                    print(f"Skipping ERP item {idx} - Missing project_name")
+                    continue
+                
+                # Parent code resolution logging
+                parent_code = next(
+                    (x['parent_code'] for x in datacode_data 
+                     if x.get('project_name') == project_name),
+                    None
+                )
+                if not parent_code:
+                    print(f"Using client name as parent code for {project_name}")
+                    parent_code = item.get('client_name', '-')
 
-    # Process CRM data
-    for item in kintone_data:
-        try:
-            project_code = f"{item['project_id']:07d}"
-            high_potential = item.get('high_potential_mark', False)
-            project_rank = phase_rank_mapping.get(item['project_name'], 'E')
+                project_code = f"{int(item['job_no']):07d}" if item['job_no'].isdigit() else item['job_no']
+                if project_code not in erp_projects:
+                    print(f"Creating new ERP project {project_code} - {project_name}")
+                    erp_projects[project_code] = {
+                        "親コード": parent_code,
+                        "顧客名": item.get('client_name', ''),
+                        "案件名": project_name,
+                        "案件ランク": 'SA',
+                        "案件コード": project_code,
+                        **{month: 0 for month in jp_months},
+                        "純売上額": 0
+                    }
 
-            if (high_potential and project_rank in ['B', 'C', 'D', 'E', 'F']) or project_rank == 'A':
-                if project_code not in project_data:
-                    parent_code = next((x['parent_code'] for x in datacode_data if x.get('project_name') == item['project_name']), "")
+                # Sales processing logging
+                try:
+                    op_profit = float(item.get('operating_profit', 0))
+                    sales_month = item['sales_date'].month
+                    fiscal_month_index = (sales_month - 4) % 12
+                    jp_month = jp_months[fiscal_month_index]
+                    
+                    print(f"Adding {op_profit} to {project_code} for {jp_month}")
+                    erp_projects[project_code][jp_month] += op_profit
+                    erp_projects[project_code]["純売上額"] += op_profit
+                    
+                except Exception as e:
+                    print(f"Error processing ERP sales data {item}: {str(e)}")
+                    
+            except Exception as e:
+                print(f"Failed processing ERP item {idx}: {str(e)}")
 
-                    rank_map = {"SA": "SA", "A": "A", "B": "B", "C": "B", "D": "B", "E": "C", "F": "D"}
-                    mapped_rank = rank_map.get(project_rank, "E")
+        # Process CRM data with detailed logging
+        print(f"Processing {len(kintone_data)} CRM records")
+        for idx, item in enumerate(kintone_data):
+            try:
+                print(f"Processing CRM item {idx}: {item.get('project_id')}")
+                
+                project_code = f"{item['project_id']:07d}"
+                high_potential = item.get('high_potential_mark', False)
+                project_rank = extract_project_rank(item.get('phase', ''))
+                
+                # Eligibility check logging
+                if not ((high_potential and project_rank in ['B', 'C', 'D', 'E', 'F', 'SA']) or project_rank == 'A'):
+                    print(f"Skipping CRM item {idx} - Not eligible (Rank: {project_rank}, High Potential: {high_potential})")
+                    continue
 
-                    project_data[project_code] = {
+                monthly_sales = calculate_monthly_net_sales(
+                    float(item.get('order_amount_net', 0)) * 1000000,
+                    item.get('billing_method', 1),
+                    item.get('contract_start_date'),
+                    item.get('contract_end_date')
+                )
+                
+                # Financial year validation logging
+                valid_months = [m for m in monthly_sales if financial_year_start <= m <= financial_year_end]
+                if not valid_months:
+                    print(f"Skipping CRM project {project_code} - No sales in financial year")
+                    continue
+
+                # Parent code resolution logging
+                parent_code = next(
+                    (x['parent_code'] for x in datacode_data 
+                     if x.get('project_name') == item['project_name']),
+                    None
+                )
+                if not parent_code:
+                    print(f"Using company name as parent code for {item['project_name']}")
+                    parent_code = item.get('company_name', '-')
+
+                # Rank mapping logging
+                rank_map = {"SA": "SA", "A": "A", "B": "B", "C": "B", "D": "B", "E": "C", "F": "D"}
+                mapped_rank = rank_map.get(project_rank, "E")
+                print(f"Mapped rank {project_rank} -> {mapped_rank} for {project_code}")
+
+                if project_code not in crm_projects:
+                    print(f"Creating new CRM project {project_code} - {item['project_name']}")
+                    crm_projects[project_code] = {
                         "親コード": parent_code,
                         "顧客名": item.get('company_name', ''),
                         "案件名": item['project_name'],
@@ -1010,28 +1103,58 @@ def create_performance_report(zac_data, datacode_data, kintone_data):
                         **{month: 0 for month in jp_months},
                         "純売上額": 0
                     }
-                    
-                # Process monthly sales with fiscal month conversion
-                monthly_sales = calculate_monthly_net_sales(
-                    float(item.get('order_amount_net', 0)) * 1000000,
-                    item.get('billing_method'),
-                    item.get('contract_start_date'),
-                    item.get('contract_end_date')
-                )
 
-                for month_english, amount in monthly_sales.items():
-                    try:
-                        jp_month = jp_months[eng_months_fiscal_order.index(month_english)]
-                        project_data[project_code][jp_month] += amount
-                        project_data[project_code]["純売上額"] += amount
-                    except ValueError:
-                        print(f"Skipping invalid month {month_english} for project {project_code}")
+                # Sales distribution logging
+                for month_date, amount in monthly_sales.items():
+                    if financial_year_start <= month_date <= financial_year_end:
+                        fiscal_month_index = (month_date.month - 4) % 12
+                        jp_month = jp_months[fiscal_month_index]
+                        print(f"Adding {amount} to {project_code} for {jp_month}")
+                        crm_projects[project_code][jp_month] += amount
+                        crm_projects[project_code]["純売上額"] += amount
+                        
+            except Exception as e:
+                print(f"Failed processing CRM item {idx}: {str(e)}")
 
-        except Exception as e:
-            print(f"Error processing CRM data: {e}")
+        print(f"Report generation completed. Total projects: {len(crm_projects) + len(erp_projects)}")
+        return list(erp_projects.values()) + list(crm_projects.values())
+        
+    except Exception as e:
+        print(f"Report generation failed: {str(e)}")
+        raise
 
-    # Convert dictionary values into a list
-    return list(project_data.values())
+def calculate_monthly_net_sales(order_amount: float, 
+                              billing_method: int,
+                              start_date: date,
+                              end_date: date) -> dict:
+    """Calculate monthly sales with logging"""
+    print(f"Calculating monthly sales for contract {start_date} to {end_date}")
+    
+    monthly_sales = {}
+    try:
+        if not all([order_amount, start_date, end_date]):
+            print("Invalid inputs for monthly sales calculation")
+            return monthly_sales
+            
+        delta = relativedelta(end_date, start_date)
+        total_months = delta.years * 12 + delta.months + 1
+        billing_method = billing_method if billing_method else total_months
+        monthly_amount = order_amount / billing_method
+        
+        print(f"Contract duration: {total_months} months, Billing: {billing_method} payments")
+        print(f"Monthly amount: {monthly_amount}")
+
+        current_date = start_date
+        for i in range(billing_method):
+            month_key = current_date.replace(day=1)
+            monthly_sales[month_key] = monthly_amount
+            print(f"Month {i+1}: {month_key} - {monthly_amount}")
+            current_date += relativedelta(months=1)
+            
+    except Exception as e:
+        print(f"Failed calculating monthly sales: {str(e)}")
+    
+    return monthly_sales
 
 
 @app.get("/api/latest_report")
@@ -1076,7 +1199,9 @@ async def generate_latest_report(
     report = create_performance_report(
         [d.__dict__ for d in erp_data],
         [d.__dict__ for d in datacode_data],
-        [d.__dict__ for d in crm_data]
+        [d.__dict__ for d in crm_data],
+        crm_month=latest_crm_upload.month,
+        crm_year=latest_crm_upload.year
     )
 
     # Save report snapshot with the provided name
